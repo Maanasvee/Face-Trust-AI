@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'FaceTrust AI - Biometric Payment System Infrastructure'
+
+Resources:
+  # S3 Bucket for storing face images
+  FaceTrustImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: facetrust-images
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  # DynamoDB Table for user data
+  FaceTrustUsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: facetrust-users
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # IAM Role for Lambda
+  FaceTrustLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: FaceTrustLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FaceTrustPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rekognition:*
+                  - s3:*
+                  - dynamodb:*
+                Resource: '*'
+
+  # Lambda Function
+  FaceTrustLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: facetrust-api
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt FaceTrustLambdaRole.Arn
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code separately
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'FaceTrust AI'}
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref FaceTrustUsersTable
+          BUCKET_NAME: !Ref FaceTrustImagesBucket
+
+  # API Gateway
+  FaceTrustAPI:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: FaceTrust-API
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - '*'
+
+  # API Gateway Integration
+  FaceTrustAPIIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref FaceTrustAPI
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt FaceTrustLambdaFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  # API Gateway Route
+  FaceTrustAPIRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref FaceTrustAPI
+      RouteKey: 'POST /api/{proxy+}'
+      Target: !Sub 'integrations/${FaceTrustAPIIntegration}'
+
+  # API Gateway Stage
+  FaceTrustAPIStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref FaceTrustAPI
+      StageName: prod
+      AutoDeploy: true
+
+  # Lambda Permission for API Gateway
+  FaceTrustLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FaceTrustLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FaceTrustAPI}/*'
+
+Outputs:
+  APIEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${FaceTrustAPI}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  
+  S3BucketName:
+    Description: S3 bucket for images
+    Value: !Ref FaceTrustImagesBucket
+  
+  DynamoDBTableName:
+    Description: DynamoDB table for users
+    Value: !Ref FaceTrustUsersTable
